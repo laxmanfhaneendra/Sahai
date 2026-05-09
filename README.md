@@ -45,5 +45,5 @@ Built for speed and efficiency.
 ---
 
 <div align="center">
-  <sub>Built with ❤️ for ultimate productivity.</sub>
+  <sub>Built for ultimate productivity.</sub>
 </div>
