@@ -1,50 +1,49 @@
-# Welcome to your Expo app 👋
+<div align="center">
+  <img src="assets/images/icon.png" alt="Sahai Logo" width="120" height="120" style="border-radius: 20px;" />
+  <h1>Sahai</h1>
+  <p><strong>Next-Generation Multimodal AI Companion & Meeting Assistant</strong></p>
+</div>
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+---
 
-## Get started
+**Sahai** is an advanced, offline-first mobile application built with React Native and Expo that acts as your ultimate AI companion. With a beautifully designed interface, Sahai effortlessly handles multi-modal inputs, local document context (RAG), and real-time meeting assistance.
 
-1. Install dependencies
+## ✨ Crazy Features
 
-   ```bash
-   npm install
-   ```
+### 🎙️ Live Meeting Engine
+Never miss a beat in your meetings again.
+- **Intelligent Question Detection:** Actively listens during live meetings and automatically detects when a question is asked.
+- **Separate Answers:** Isolates questions and provides separate, concise answers in real-time, functioning as an invisible co-pilot.
 
-2. Start the app
+### 🧠 Advanced RAG & Document Context
+Turn your files into an instant knowledge base.
+- **Multiple Files Support:** Upload up to 50 documents, including PDFs, text files, and even **code files**.
+- **Offline-First Retrieval:** Uses a highly efficient on-device chunking and BM25 relevance-scoring system.
+- **Context Injection:** Seamlessly utilizes your uploaded files as context for deeply accurate and grounded chat responses.
 
-   ```bash
-   npx expo start
-   ```
+### 🎥 Intelligent Video Processing
+Analyze video inputs on the fly.
+- **Frame Segregation:** Processes video by extracting two frames per second for AI vision analysis.
+- **Toggleable Workflow:** Video processing features can be easily toggled on or off to conserve resources.
 
-In the output, you'll find options to open the app in a
+### 🌌 Multimodal Input Processing
+Why type when you can show and tell?
+- **All-in-One Chat:** Seamlessly handles **audio, video, images, and text** all within a single chat interface.
+- **Vision Integration:** Uses Llama Vision to extract text and visual context from images, automatically answering prioritized questions from the visual data.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+### ⚡ Content Summarization & Caching
+Built for speed and efficiency.
+- **Summarization:** Instantly summarizes long conversations or extracted contexts.
+- **Smart Caching:** Employs targeted memory caching for documents and images to prevent stale data leaks and optimize performance without unnecessary re-processing.
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+## 🛠️ Technology Stack
+- **Framework:** React Native / Expo
+- **AI Models:** Groq (Llama 3.3, Llama 4 Vision) & Google Gemini (2.0 Flash)
+- **Local Storage:** On-device persistent JSON chunk indexing & file storage
+- **Retrieval:** Custom Local BM25 Scoring Algorithm
 
-## Get a fresh project
+---
 
-When you're ready, run:
-
-```bash
-npm run reset-project
-```
-
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
-
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+<div align="center">
+  <sub>Built with ❤️ for ultimate productivity.</sub>
+</div>

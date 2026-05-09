@@ -9,7 +9,13 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Sahai uses the camera to analyze images with AI.",
+        "NSMicrophoneUsageDescription": "Sahai needs microphone access for video recording.",
+        "NSPhotoLibraryAddUsageDescription": "Sahai saves captured photos to your library.",
+        "NSPhotoLibraryUsageDescription": "Sahai accesses your photo library to select images."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -33,10 +39,33 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#000000",
           "dark": {
             "backgroundColor": "#000000"
           }
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Sahai uses the camera to analyze images with AI.",
+          "microphonePermission": "Sahai needs microphone access for video recording.",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Sahai saves your captured photos to the library.",
+          "savePhotosPermission": "Sahai saves photos taken with the camera.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Sahai accesses photos for AI analysis.",
+          "cameraPermission": "Sahai uses camera access to capture images for AI analysis."
         }
       ]
     ],
