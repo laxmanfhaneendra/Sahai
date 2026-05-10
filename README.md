@@ -6,7 +6,6 @@
   [![Expo](https://img.shields.io/badge/Expo-000020?style=for-the-badge&logo=expo&logoColor=white)](https://expo.dev/)
   [![React Native](https://img.shields.io/badge/React_Native-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactnative.dev/)
   [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 </div>
 
 ---
@@ -80,7 +79,7 @@ Sahai is designed with a service-oriented architecture to ensure modularity and 
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/yourusername/sahai.git
+   git clone https://github.com/laxmanfhaneendra/Sahai.git
    cd sahai
    ```
 
@@ -92,8 +91,8 @@ Sahai is designed with a service-oriented architecture to ensure modularity and 
 3. **Configure Environment Variables:**
    Create a `.env` file in the root directory and add your API keys:
    ```env
-   GROQ_API_KEY=your_groq_key_here
-   GEMINI_API_KEY=your_gemini_key_here
+   EXPO_PUBLIC_GROQ_API_KEY=your_groq_key_here
+   EXPO_PUBLIC_GEMINI_API_KEY=your_gemini_key_here
    ```
 
 4. **Start the development server:**
@@ -119,4 +118,4 @@ We welcome contributions! Please follow these steps:
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
 3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
 4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+5. Open a Pull Request
