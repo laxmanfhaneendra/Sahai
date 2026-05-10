@@ -1,49 +1,134 @@
 <div align="center">
-  <img src="assets/images/icon.png" alt="Sahai Logo" width="120" height="120" style="border-radius: 20px;" />
+  <img src="assets/images/icon.png" alt="Sahai Logo" width="120" height="120" style="border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.1);" />
   <h1>Sahai</h1>
-  <p><strong>Next-Generation Multimodal AI Companion & Meeting Assistant</strong></p>
+  <p><strong>The Multimodal AI Copilot for Your Life and Meetings</strong></p>
+
+  [![Expo](https://img.shields.io/badge/Expo-000020?style=for-the-badge&logo=expo&logoColor=white)](https://expo.dev/)
+  [![React Native](https://img.shields.io/badge/React_Native-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactnative.dev/)
+  [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 </div>
 
 ---
 
-**Sahai** is an advanced, offline-first mobile application built with React Native and Expo that acts as your ultimate AI companion. With a beautifully designed interface, Sahai effortlessly handles multi-modal inputs, local document context (RAG), and real-time meeting assistance.
+## 🌟 Overview
 
-## ✨ Crazy Features
+**Sahai** is a sophisticated, production-grade mobile application that redefines the concept of an AI assistant. Built on a foundation of **React Native** and **Expo**, Sahai integrates state-of-the-art Large Language Models (LLMs) with advanced local processing to provide a private, fast, and multimodal experience.
 
-### 🎙️ Live Meeting Engine
-Never miss a beat in your meetings again.
-- **Intelligent Question Detection:** Actively listens during live meetings and automatically detects when a question is asked.
-- **Separate Answers:** Isolates questions and provides separate, concise answers in real-time, functioning as an invisible co-pilot.
+Whether you're in a high-stakes meeting, analyzing complex documents, or needing instant visual context from your camera, Sahai acts as your invisible co-pilot—always listening, always ready.
 
-### 🧠 Advanced RAG & Document Context
-Turn your files into an instant knowledge base.
-- **Multiple Files Support:** Upload up to 50 documents, including PDFs, text files, and even **code files**.
-- **Offline-First Retrieval:** Uses a highly efficient on-device chunking and BM25 relevance-scoring system.
-- **Context Injection:** Seamlessly utilizes your uploaded files as context for deeply accurate and grounded chat responses.
+---
 
-### 🎥 Intelligent Video Processing
-Analyze video inputs on the fly.
-- **Frame Segregation:** Processes video by extracting two frames per second for AI vision analysis.
-- **Toggleable Workflow:** Video processing features can be easily toggled on or off to conserve resources.
+## 🚀 Key Features
 
-### 🌌 Multimodal Input Processing
-Why type when you can show and tell?
-- **All-in-One Chat:** Seamlessly handles **audio, video, images, and text** all within a single chat interface.
-- **Vision Integration:** Uses Llama Vision to extract text and visual context from images, automatically answering prioritized questions from the visual data.
+### 🎙️ Intelligence-Driven Meeting Engine
+Transform how you participate in meetings. Sahai doesn't just record; it understands.
+- **Real-time Question Detection:** Uses advanced NLP to detect questions directed at you or the group.
+- **Autonomous Answering:** Generates context-aware answers to detected questions in the background.
+- **Live Diarization:** (Planned) Persistent voice enrollment for personalized speaker filtering.
 
-### ⚡ Content Summarization & Caching
-Built for speed and efficiency.
-- **Summarization:** Instantly summarizes long conversations or extracted contexts.
-- **Smart Caching:** Employs targeted memory caching for documents and images to prevent stale data leaks and optimize performance without unnecessary re-processing.
+### 🧠 Advanced RAG (Retrieval-Augmented Generation)
+Your documents, now searchable and conversational.
+- **Massive Context Support:** Upload and index up to 50 documents (PDFs, TXT, Code files).
+- **On-Device Vector-ish Engine:** Uses a custom BM25 scoring algorithm for lightning-fast, offline-first context retrieval.
+- **Privacy First:** Your data is indexed and queried locally before being sent as relevant context to the AI.
+
+### 🎥 Vision & Multimodal Capabilities
+See the world through the eyes of AI.
+- **AI Camera:** Real-time analysis of visual data using Llama Vision APIs.
+- **Video Intelligence:** Extracts key frames for temporal analysis of events or demonstrations.
+- **All-in-One Chat:** A unified interface for Text, Audio, Video, and Image inputs.
+
+### ⚡ Performance & Reliability
+- **Smart Caching:** Sophisticated memory management for document chunks and image assets.
+- **Offline-First Resilience:** Core search and indexing functions work without an internet connection.
+- **Haptic UI:** Deeply integrated haptic feedback for a premium native feel.
+
+---
 
 ## 🛠️ Technology Stack
-- **Framework:** React Native / Expo
-- **AI Models:** Groq (Llama 3.3, Llama 4 Vision) & Google Gemini (2.0 Flash)
-- **Local Storage:** On-device persistent JSON chunk indexing & file storage
-- **Retrieval:** Custom Local BM25 Scoring Algorithm
+
+| Layer | Technologies |
+| :--- | :--- |
+| **Frontend** | React Native, Expo Router, Reanimated, Expo Blur, Expo Haptics |
+| **AI Models** | Groq (Llama 3.3 / Llama 3.2 Vision), Google Gemini 2.0 Flash |
+| **Services** | Whisper (Speech-to-Text), Groq Audio, Custom Question Detection |
+| **Data Engine** | Local File System (Expo FS), BM25 Retrieval, Persistent JSON Storage |
+| **Language** | TypeScript (Strict Mode) |
+
+---
+
+## 🏗️ Technical Architecture
+
+Sahai is designed with a service-oriented architecture to ensure modularity and speed:
+
+1.  **RagContextStore:** Handles the chunking, indexing, and persistent storage of user documents.
+2.  **QuestionDetector:** A dedicated service that monitors transcription streams for specific intent.
+3.  **ChatSessionStore:** Manages complex multi-modal conversation histories and context injection.
+4.  **Vision Engine:** Optimized frame-extraction pipeline for video-to-AI analysis.
+
+---
+
+## 📦 Getting Started
+
+### Prerequisites
+- Node.js (v18+)
+- npm or bun
+- Expo Go app on your mobile device or an Emulator
+
+### Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/sahai.git
+   cd sahai
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+
+3. **Configure Environment Variables:**
+   Create a `.env` file in the root directory and add your API keys:
+   ```env
+   GROQ_API_KEY=your_groq_key_here
+   GEMINI_API_KEY=your_gemini_key_here
+   ```
+
+4. **Start the development server:**
+   ```bash
+   npx expo start
+   ```
+
+---
+
+## 📱 Screenshots
+
+<div align="center">
+  <img src="assets/images/sahai_app_mockup.png" alt="Sahai UI Mockup" width="400" style="border-radius: 20px;" />
+  <p><i>The sleek, modern interface of Sahai.</i></p>
+</div>
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Please follow these steps:
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+---
+
+## 📄 License
+
+Distributed under the MIT License. See `LICENSE` for more information.
 
 ---
 
 <div align="center">
-  <sub>Built for ultimate productivity.</sub>
+  <p>Built with ❤️ for the future of productivity.</p>
 </div>
