@@ -1,7 +1,8 @@
-import { loadChatThreads, saveChatThreads, SessionChatThread } from '@/services/chatSessionStore';
+﻿import { loadChatThreads, saveChatThreads, SessionChatThread } from '@/services/chatSessionStore';
 import { transcribeAudioWithGroq } from '@/services/groqSpeech';
-import { analyzeImageWithGroq, chatWithGroqText, GroqChatContextMessage } from '@/services/groqVision';
+import { analyzeImageWithGroq, analyzeLiveFrame, chatWithGroqText, GroqChatContextMessage } from '@/services/groqVision';
 import { transcribeAndAnswerWithGroq } from '@/services/groqQuestionAnswering';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { findSimilarItems, embedItem, EmbeddedItem, pruneOldItems } from '@/services/semanticSearch';
 import { retrieveTopChunks, formatRagContext } from '@/services/ragSearch';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,7 +20,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { loadRagDocuments, addRagDocument, deleteRagDocument, replaceRagDocument, RagDocument, RagGroup, loadRagGroups, addRagGroup, deleteRagGroup, migrateToFileStorage, cleanupOrphanedFiles, loadChunkIndex } from '@/services/ragContextStore';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -167,6 +168,19 @@ export default function SearchScreen() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [storeReady, setStoreReady] = useState(false);
   const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
+
+  // â”€â”€ Live Camera PiP State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Completely isolated from audio/chat state â€” uses its own interval ref
+  // and its own analyzing flag so it never blocks or races with the mic loop.
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraAnalyzing, setCameraAnalyzing] = useState(false);
+  const [frameCount, setFrameCount] = useState(0);
+  const cameraRef = useRef<CameraView>(null);
+  const cameraIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const frameCountRef = useRef(0); // shadow ref so interval closure always has fresh value
+  const cameraAnalyzingRef = useRef(false); // shadow ref to avoid stale closure in interval
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   const [contextVisible, setContextVisible] = useState(false);
   const [ragDocs, setRagDocs] = useState<RagDocument[]>([]);
@@ -419,6 +433,26 @@ export default function SearchScreen() {
 
   useEffect(() => { setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 40); }, [messages, sending]);
   useEffect(() => { return () => { listenLoopActiveRef.current = false; recorder.stop().catch(() => {}); }; }, [recorder]);
+
+  // Cleanup camera interval on unmount
+  useEffect(() => {
+    return () => {
+      if (cameraIntervalRef.current) clearInterval(cameraIntervalRef.current);
+    };
+  }, []);
+
+  // Pulse animation for the live indicator dot
+  useEffect(() => {
+    if (!cameraActive) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.3, duration: 600, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [cameraActive, pulseAnim]);
   useEffect(() => {
     const se = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const he = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
@@ -431,6 +465,82 @@ export default function SearchScreen() {
     const m = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 640 } }], { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG });
     return { uri: m.uri, base64: await FileSystem.readAsStringAsync(m.uri, { encoding: 'base64' as any }), mimeType: 'image/jpeg' };
   };
+
+  // â”€â”€ Live Camera Frame Capture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // Captures one JPEG frame from the CameraView, compresses it, and sends it
+  // to Groq Llama 4 Scout vision. Uses its own analyzing flag so it never
+  // races with the audio transcription pipeline.
+  const captureAndAnalyzeFrame = useCallback(async () => {
+    if (!cameraRef.current || cameraAnalyzingRef.current) return;
+    cameraAnalyzingRef.current = true;
+    setCameraAnalyzing(true);
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ base64: false, quality: 0.35, skipProcessing: true });
+      if (!photo?.uri) return;
+      const compressed = await ImageManipulator.manipulateAsync(
+        photo.uri,
+        [{ resize: { width: 480 } }],
+        { compress: 0.4, format: ImageManipulator.SaveFormat.JPEG },
+      );
+      const b64 = await FileSystem.readAsStringAsync(compressed.uri, { encoding: 'base64' as any });
+      await FileSystem.deleteAsync(photo.uri, { idempotent: true }).catch(() => {});
+      await FileSystem.deleteAsync(compressed.uri, { idempotent: true }).catch(() => {});
+      frameCountRef.current += 1;
+      const idx = frameCountRef.current;
+      setFrameCount(idx);
+      const result = await analyzeLiveFrame(b64, idx);
+      if (result.description?.trim()) {
+        // Inject as a visually distinct camera message â€” never touches sending state
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `cam-${Date.now()}`,
+            role: 'assistant' as const,
+            text: `\uD83D\uDCF9 **Frame ${idx}** \u2022 Live Camera\n${result.description}`,
+            createdAt: Date.now(),
+          },
+        ]);
+      }
+    } catch (err: any) {
+      console.warn('[LiveCamera] Frame analysis error:', err?.message ?? err);
+    } finally {
+      cameraAnalyzingRef.current = false;
+      setCameraAnalyzing(false);
+    }
+  }, []);
+
+  const startLiveCamera = useCallback(async () => {
+    const granted = cameraPermission?.granted ?? false;
+    if (!granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) {
+        Alert.alert('Camera permission needed', 'Please allow camera access for live analysis.');
+        return;
+      }
+    }
+    frameCountRef.current = 0;
+    setFrameCount(0);
+    setCameraActive(true);
+    // Start frame loop â€” 4 second interval gives Groq enough time to respond
+    // without creating a backlog of pending requests
+    cameraIntervalRef.current = setInterval(() => {
+      void captureAndAnalyzeFrame();
+    }, 4000);
+    // Capture the first frame immediately so the user sees instant feedback
+    setTimeout(() => { void captureAndAnalyzeFrame(); }, 800);
+  }, [cameraPermission, requestCameraPermission, captureAndAnalyzeFrame]);
+
+  const stopLiveCamera = useCallback(() => {
+    if (cameraIntervalRef.current) {
+      clearInterval(cameraIntervalRef.current);
+      cameraIntervalRef.current = null;
+    }
+    cameraAnalyzingRef.current = false;
+    setCameraActive(false);
+    setCameraAnalyzing(false);
+    setFrameCount(0);
+    frameCountRef.current = 0;
+  }, []);
 
   const pickImage = async () => {
     if (sending) return;
@@ -460,7 +570,7 @@ export default function SearchScreen() {
         promptForChat = pq ? `Question detected in image text: "${pq}". Answer only this question directly.` : 'No question was found in image text. Give a concise answer about what you think this image is conveying.';
       }
       const pastImages = imageMemoryRef.current.length > 0 ? findSimilarItems(promptForChat, imageMemoryRef.current, 2, 0.4) : [];
-      const pastImageContext = pastImages.length > 0 ? '\n\n[Relevant past images for context]:\n' + pastImages.map(i => `• ${i.text.substring(0, 150)}`).join('\n') : '';
+      const pastImageContext = pastImages.length > 0 ? '\n\n[Relevant past images for context]:\n' + pastImages.map(i => `â€¢ ${i.text.substring(0, 150)}`).join('\n') : '';
       const ragContextWithContent = ragDocs.length > 0 ? await (async () => formatRagContext(retrieveTopChunks(promptForChat, await loadChunkIndex(), 5)))() : '';
       const res = await chatWithGroqText(promptForChat + pastImageContext + (ragContextWithContent ? '\n\n' + ragContextWithContent : ''), contextHistory, imageContext || undefined);
       setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: res.content || 'No response from model.', extractedText: extractedText || imageContext, createdAt: Date.now() }]);
@@ -702,7 +812,7 @@ export default function SearchScreen() {
                   {isTyping ? (
                     <View style={styles.typingRow}>
                       <ActivityIndicator size="small" color="#D4D4D4" />
-                      <Text style={styles.typingText}>Thinkingâ€¦</Text>
+                      <Text style={styles.typingText}>ThinkingÃ¢â‚¬Â¦</Text>
                     </View>
                   ) : (
                     <Text style={styles.messageText}>{item.text}</Text>
@@ -719,6 +829,18 @@ export default function SearchScreen() {
               <Text style={styles.liveTitle}>Live Listen Mode</Text>
               <Text style={styles.liveStatus}>{liveStatus}</Text>
             </View>
+            {/* Camera toggle - fully independent of the mic loop */}
+            <Pressable
+              style={[styles.liveCameraBtn, cameraActive && styles.liveCameraBtnActive]}
+              onPress={cameraActive ? stopLiveCamera : startLiveCamera}
+              accessibilityLabel={cameraActive ? 'Stop live camera' : 'Start live camera'}
+            >
+              <Ionicons
+                name={cameraActive ? 'videocam' : 'videocam-outline'}
+                size={18}
+                color={cameraActive ? '#000' : '#CFCFCF'}
+              />
+            </Pressable>
             <Pressable
               style={[styles.liveBtn, liveListening && styles.liveBtnStop]}
               onPress={liveListening ? stopLiveListening : startLiveListening}
@@ -854,7 +976,7 @@ export default function SearchScreen() {
                 >
                   <Text style={styles.historyItemTitle} numberOfLines={1}>{item.title}</Text>
                   <Text style={styles.historyItemMeta}>
-                    {formatThreadTime(item.updatedAt)} Â· {item.messages.length} messages
+                    {formatThreadTime(item.updatedAt)} Ã‚Â· {item.messages.length} messages
                   </Text>
                 </Pressable>
               )}
@@ -1002,6 +1124,28 @@ export default function SearchScreen() {
           </AnimatedBlurView>
         </View>
       </Modal>
+
+      {/* Floating Camera PiP Overlay - sits above all content via zIndex 999 */}
+      {cameraActive ? (
+        <View style={styles.pip} pointerEvents="box-none">
+          <View style={styles.pipHeader}>
+            <Animated.View style={[styles.pipDot, { opacity: pulseAnim }]} />
+            <Text style={styles.pipLive}>LIVE</Text>
+            <Text style={styles.pipFrameCount}>
+              {cameraAnalyzing ? 'Analyzing...' : 'Frame ' + frameCount}
+            </Text>
+            <Pressable style={styles.pipClose} onPress={stopLiveCamera} accessibilityLabel="Close camera preview">
+              <Ionicons name="close" size={14} color="#E5E5E5" />
+            </Pressable>
+          </View>
+          <CameraView ref={cameraRef} style={styles.pipCamera} facing="back" />
+          {cameraAnalyzing ? (
+            <View style={styles.pipAnalyzingOverlay} pointerEvents="none">
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            </View>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1124,6 +1268,20 @@ const styles = StyleSheet.create({
   },
   liveTitle: { color: '#F5F5F5', fontSize: 15, fontWeight: '700' },
   liveStatus: { color: '#B5B5B5', fontSize: 14, marginTop: 2 },
+  liveCameraBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#1D1D1D',
+    borderWidth: 1,
+    borderColor: '#3A3A3A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  liveCameraBtnActive: {
+    backgroundColor: '#E5E5E5',
+    borderColor: '#D0D0D0',
+  },
   liveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1135,6 +1293,68 @@ const styles = StyleSheet.create({
   },
   liveBtnStop: { backgroundColor: '#BEBEBE' },
   liveBtnText: { color: '#000', fontSize: 14, fontWeight: '700' },
+  pip: {
+    position: 'absolute',
+    bottom: 210,
+    right: 14,
+    width: 168,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#3A3A3A',
+    backgroundColor: '#0C0C0C',
+    overflow: 'hidden',
+    zIndex: 999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.7,
+    shadowRadius: 16,
+    elevation: 20,
+  },
+  pipHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    backgroundColor: '#0C0C0CEE',
+  },
+  pipDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#EF4444',
+  },
+  pipLive: {
+    color: '#EF4444',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  pipFrameCount: {
+    flex: 1,
+    color: '#8A8A8A',
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  pipClose: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#2A2A2A',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pipCamera: {
+    width: '100%',
+    height: 224,
+  },
+  pipAnalyzingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    top: 27,
+    backgroundColor: '#00000066',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   attachBar: {
     marginHorizontal: 10,
     marginBottom: 8,

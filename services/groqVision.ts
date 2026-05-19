@@ -8,6 +8,11 @@ const GROQ_API_KEY = process.env.EXPO_PUBLIC_GROQ_API_KEY ?? '';
 const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
 const CHAT_MODEL = 'llama-3.3-70b-versatile';
 
+export interface LiveFrameResult {
+  description: string;
+  model: string;
+}
+
 export interface GroqVisionResult {
   description: string;
   model: string;
@@ -253,3 +258,70 @@ export async function chatWithGroqText(
   };
 }
 
+/**
+ * Analyzes a single camera frame captured during a live meeting.
+ * Optimized for low latency — short response, meeting-aware prompt.
+ * Runs independently of the audio/chat pipeline so it never blocks it.
+ *
+ * @param base64Frame - Compressed base64 JPEG frame (no data prefix)
+ * @param frameIndex  - Frame sequence number for display
+ */
+export async function analyzeLiveFrame(
+  base64Frame: string,
+  frameIndex: number = 1,
+): Promise<LiveFrameResult> {
+  if (!GROQ_API_KEY) {
+    throw new Error('Groq API key is not configured. Add EXPO_PUBLIC_GROQ_API_KEY to your .env file.');
+  }
+
+  const dataUrl = `data:image/jpeg;base64,${base64Frame}`;
+
+  const body = {
+    model: VISION_MODEL,
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You are a silent live meeting observer. When given a camera frame, respond with 1-3 concise bullet points describing ONLY what is relevant to a meeting context: visible text, slides, whiteboards, documents, or actions. ' +
+          'If the frame shows a person with nothing noteworthy, just say "👤 Person in frame." ' +
+          'If the frame is blurry or unclear, just say "🔍 Frame unclear." ' +
+          'Never add preamble. Never say "I see" or "The image shows". Be extremely terse.',
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: { url: dataUrl },
+          },
+          {
+            type: 'text',
+            text: `Meeting frame #${frameIndex}. What is relevant here?`,
+          },
+        ],
+      },
+    ],
+    max_tokens: 100,
+    temperature: 0.3,
+  };
+
+  const response = await fetch(GROQ_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${GROQ_API_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Groq API error ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  return {
+    description: data.choices?.[0]?.message?.content ?? '',
+    model: data.model ?? VISION_MODEL,
+  };
+}
