@@ -162,6 +162,7 @@ export default function SearchScreen() {
   const [liveStatus, setLiveStatus] = useState('Live listen is off');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [historyVisible, setHistoryVisible] = useState(false);
+  const [threadMenuVisible, setThreadMenuVisible] = useState<string | null>(null);
   const [holdRecording, setHoldRecording] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [threads, setThreads] = useState<SessionChatThread[]>([]);
@@ -656,9 +657,19 @@ export default function SearchScreen() {
           continue;
         }
 
-        // Trigger response with cooldown - use direct add instead of submitMessage
+        // Trigger response — store the transcribed question as a user message
+        // so conversations are readable when reopened from history.
         lastQuestionTimeRef.current = now;
         setLiveStatus('Question detected! Answering...');
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `live-q-${Date.now()}`,
+            role: 'user' as const,
+            text: `[Live] ${result.question}`,
+            createdAt: Date.now(),
+          },
+        ]);
         addAssistantMessage(result.answer);
         setLiveStatus('Listening...');
       } catch (err: any) {
@@ -755,6 +766,37 @@ export default function SearchScreen() {
     setInput('');
     closeHistory();
     void saveChatThreads(validExisting, newThread.id).catch(() => { });
+  };
+
+  const deleteThread = (threadId: string) => {
+    const remaining = threadsRef.current.filter((t) => t.id !== threadId);
+    threadsRef.current = remaining;
+    setThreads(remaining);
+    setThreadMenuVisible(null);
+    if (activeThreadId === threadId) {
+      const next = remaining.find((t) => t.messages.length > 0);
+      if (next) {
+        setActiveThreadId(next.id);
+        setMessages(next.messages as ChatMessage[]);
+      } else {
+        const now = Date.now();
+        const fresh: SessionChatThread = {
+          id: `thread-${now}`,
+          title: 'New thread',
+          createdAt: now,
+          updatedAt: now,
+          messages: [],
+        };
+        threadsRef.current = [fresh];
+        setThreads([fresh]);
+        setActiveThreadId(fresh.id);
+        setMessages([]);
+      }
+    }
+    void saveChatThreads(
+      remaining.filter((t) => t.messages.length > 0),
+      activeThreadId ?? ''
+    ).catch(() => {});
   };
 
   const typingMessage: ChatMessage | null = sending
@@ -970,15 +1012,32 @@ export default function SearchScreen() {
               keyExtractor={(item) => item.id}
               contentContainerStyle={styles.historyList}
               renderItem={({ item }) => (
-                <Pressable
-                  style={[styles.historyItem, item.id === activeThreadId && styles.historyItemActive]}
-                  onPress={() => openThread(item.id)}
-                >
-                  <Text style={styles.historyItemTitle} numberOfLines={1}>{item.title}</Text>
-                  <Text style={styles.historyItemMeta}>
-                    {formatThreadTime(item.updatedAt)} Ã‚Â· {item.messages.length} messages
-                  </Text>
-                </Pressable>
+                <View style={[styles.historyItem, item.id === activeThreadId && styles.historyItemActive, { flexDirection: 'row', alignItems: 'center' }]}>
+                  <Pressable style={{ flex: 1 }} onPress={() => { setThreadMenuVisible(null); openThread(item.id); }}>
+                    <Text style={styles.historyItemTitle} numberOfLines={1}>{item.title}</Text>
+                    <Text style={styles.historyItemMeta}>
+                      {formatThreadTime(item.updatedAt)}  •  {item.messages.length} messages
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.threadMenuBtn}
+                    onPress={() => setThreadMenuVisible(threadMenuVisible === item.id ? null : item.id)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="ellipsis-vertical" size={18} color="#6A6A6A" />
+                  </Pressable>
+                  {threadMenuVisible === item.id && (
+                    <View style={styles.threadMenuDropdown}>
+                      <Pressable
+                        style={styles.threadMenuOption}
+                        onPress={() => deleteThread(item.id)}
+                      >
+                        <Ionicons name="trash-outline" size={16} color="#F87171" />
+                        <Text style={styles.threadMenuOptionText}>Delete</Text>
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
               )}
               ListEmptyComponent={<Text style={styles.historyEmpty}>No threads yet</Text>}
             />
@@ -1558,6 +1617,41 @@ const styles = StyleSheet.create({
     color: '#A8A8A8',
     textAlign: 'center',
     paddingVertical: 12,
+  },
+  threadMenuBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  threadMenuDropdown: {
+    position: 'absolute',
+    top: 0,
+    right: 28,
+    backgroundColor: '#1A1A1A',
+    borderWidth: 1,
+    borderColor: '#2E2E2E',
+    borderRadius: 8,
+    paddingVertical: 4,
+    minWidth: 110,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+    elevation: 8,
+    zIndex: 1000,
+  },
+  threadMenuOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  threadMenuOptionText: {
+    color: '#F87171',
+    fontSize: 14,
+    fontWeight: '500',
   },
   fileMenuBtn: {
     padding: 8,
