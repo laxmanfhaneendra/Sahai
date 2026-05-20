@@ -105,7 +105,27 @@ Sahai is designed with a service-oriented architecture to ensure modularity and 
 ## 📱 Screenshots
 
 <div align="center">
-  <img src="assets/images/sahai_app_mockup.png" alt="Sahai UI Mockup" width="400" style="border-radius: 20px;" />
+  <table style="border: none; border-collapse: collapse;">
+    <tr style="border: none;">
+      <td style="padding: 10px; border: none; text-align: center; vertical-align: top;">
+        <img src="assets/images/screenshot_meeting.jpeg" alt="Meeting Engine Screen" width="250" style="border-radius: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
+        <br />
+        <p align="center" style="margin-top: 8px;"><b>🎙️ Meeting Engine</b></p>
+      </td>
+      <td style="padding: 10px; border: none; text-align: center; vertical-align: top;">
+        <img src="assets/images/screenshot_rag.jpeg" alt="Local Document RAG" width="250" style="border-radius: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
+        <br />
+        <p align="center" style="margin-top: 8px;"><b>🧠 Local RAG</b></p>
+      </td>
+      <td style="padding: 10px; border: none; text-align: center; vertical-align: top;">
+        <img src="assets/images/screenshot_chat.jpeg" alt="AI Chat Session" width="250" style="border-radius: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
+        <br />
+        <p align="center" style="margin-top: 8px;"><b>💬 AI Chat</b></p>
+      </td>
+    </tr>
+  </table>
+  <br />
+  <img src="assets/images/sahai_app_mockup.png" alt="Sahai UI Mockup" width="500" style="border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.4);" />
   <p><i>The sleek, modern interface of Sahai.</i></p>
 </div>
 
