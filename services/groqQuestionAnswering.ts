@@ -50,9 +50,9 @@ Transcript: "${transcript}"`;
 
 
 
-    // More flexible parsing - handle various formats
+    // More flexible parsing - handle various formats including multi-line answers
     const detectedMatch = content.match(/DETECTED:\s*(yes|no)/i);
-    const answerMatch = content.match(/ANSWER:\s*(.+?)(?:\n|$)/i);
+    const answerMatch = content.match(/ANSWER:\s*([\s\S]+)$/i);
 
     const hasQuestion = detectedMatch?.[1]?.toLowerCase() === 'yes';
     const answerText = (answerMatch?.[1] || '').trim();

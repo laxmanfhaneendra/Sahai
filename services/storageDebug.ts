@@ -19,10 +19,10 @@ export async function getStorageUsage(): Promise<{
   try {
     const docs = await loadRagDocuments();
 
-    // Calculate individual document sizes
+    // Calculate individual document sizes (using string length for RN compatibility)
     const documentsDetail = docs.map(doc => ({
       name: doc.name,
-      sizeKB: Math.round(Buffer.byteLength(JSON.stringify(doc), 'utf8') / 1024),
+      sizeKB: Math.round(JSON.stringify(doc).length / 1024),
     }));
 
     const totalKB = documentsDetail.reduce((sum, doc) => sum + doc.sizeKB, 0);

@@ -1,10 +1,23 @@
-﻿import { loadChatThreads, saveChatThreads, SessionChatThread } from '@/services/chatSessionStore';
+import { loadChatThreads, saveChatThreads, SessionChatThread } from '@/services/chatSessionStore';
 import { transcribeAudioWithGroq } from '@/services/groqSpeech';
 import { analyzeImageWithGroq, analyzeLiveFrame, chatWithGroqText, GroqChatContextMessage } from '@/services/groqVision';
 import { transcribeAndAnswerWithGroq } from '@/services/groqQuestionAnswering';
+import { writeWavFileFromChunks } from '@/services/audioWav';
+import { cancelSpeechModelDownload, downloadSpeechModel, isSpeechModelDownloaded, SPEECH_MODELS, transcribeAudioWithLocalWhisper } from '@/services/localSpeech';
+import {
+  isModelDownloaded,
+  downloadModel,
+  cancelModelDownload,
+  chatWithLocalLlama,
+  deleteModelFile,
+  LocalChatMessage,
+  LocalModelId,
+  MODELS,
+} from '@/services/localSlm';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { findSimilarItems, embedItem, EmbeddedItem, pruneOldItems } from '@/services/semanticSearch';
 import { retrieveTopChunks, formatRagContext } from '@/services/ragSearch';
+import AudioRecord from '@fugood/react-native-audio-pcm-stream';
 import { Ionicons } from '@expo/vector-icons';
 import MaskedView from '@react-native-masked-view/masked-view';
 import {
@@ -60,6 +73,14 @@ type SelectedImage = {
 type ChatMode = 'chat' | 'listen';
 
 const LIVE_CHUNK_MS = 9000;
+const LOCAL_STT_CHUNK_MS = 5000;
+const PCM_OPTIONS = {
+  sampleRate: 16000,
+  channels: 1,
+  bitsPerSample: 16,
+  audioSource: 6,
+  bufferSize: 4096,
+};
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const stripWelcomeMessages = (threadMessages: ChatMessage[]): ChatMessage[] =>
@@ -169,6 +190,126 @@ export default function SearchScreen() {
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [storeReady, setStoreReady] = useState(false);
   const [selectedImage, setSelectedImage] = useState<SelectedImage | null>(null);
+
+  // ─── Local SLM State ───
+  const [modelProvider, setModelProvider] = useState<'groq' | 'local'>('groq');
+  const [activeLocalModel, setActiveLocalModel] = useState<LocalModelId>('qwen');
+  const [isDownloaded, setIsDownloaded] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  
+  // ─── Local Speech State ───
+  const [speechProvider, setSpeechProvider] = useState<'groq' | 'local'>('groq');
+  const [speechModelReady, setSpeechModelReady] = useState(false);
+  const [speechDownloading, setSpeechDownloading] = useState(false);
+  const [speechDownloadProgress, setSpeechDownloadProgress] = useState(0);
+  const pcmChunksRef = useRef<string[]>([]);
+  const pcmSubscriptionRef = useRef<{ remove?: () => void } | null>(null);
+  const pcmRecordingRef = useRef(false);
+
+  // Check if model is already downloaded on mount or when selected model changes
+  useEffect(() => {
+    const checkModel = async () => {
+      if (!MODELS[activeLocalModel]) {
+        console.warn(`Unknown local model id "${String(activeLocalModel)}", resetting to Qwen.`);
+        setActiveLocalModel('qwen');
+        setIsDownloaded(false);
+        return;
+      }
+      const downloaded = await isModelDownloaded(activeLocalModel);
+      setIsDownloaded(downloaded);
+    };
+    checkModel();
+  }, [activeLocalModel]);
+
+  useEffect(() => {
+    const checkSpeechModel = async () => {
+      if (speechProvider !== 'local') return;
+      const downloaded = await isSpeechModelDownloaded();
+      setSpeechModelReady(downloaded);
+    };
+    checkSpeechModel();
+  }, [speechProvider]);
+
+  const toggleModelProvider = () => {
+    setModelProvider((p) => (p === 'groq' ? 'local' : 'groq'));
+  };
+
+  const handleModelChipLongPress = () => {
+    if (!isDownloaded) return;
+    const modelInfo = MODELS[activeLocalModel];
+    Alert.alert(
+      'Manage Local Model',
+      `You have the local ${modelInfo.label} installed. Would you like to delete it to free up ${modelInfo.sizeLabel} of space?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Model',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteModelFile(activeLocalModel);
+              setIsDownloaded(false);
+              setModelProvider('groq');
+              Alert.alert('Model Deleted', 'The local model file has been successfully deleted.');
+            } catch (e: any) {
+              Alert.alert('Error', `Failed to delete model: ${e.message}`);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleStartDownload = async () => {
+    setIsDownloading(true);
+    setDownloadProgress(0);
+    try {
+      await downloadModel(activeLocalModel, (progress) => {
+        setDownloadProgress(progress);
+      });
+      setIsDownloaded(true);
+      setIsDownloading(false);
+      Alert.alert('Success', `${MODELS[activeLocalModel].label} downloaded successfully! You can now use offline reasoning.`);
+    } catch (err: any) {
+      setIsDownloading(false);
+      if (err.message?.includes('cancel') || err.message?.includes('Cancel')) {
+        return;
+      }
+      Alert.alert('Download Error', `Failed to download local model: ${err.message}`);
+    }
+  };
+
+  const handleCancelDownload = async () => {
+    await cancelModelDownload();
+    setIsDownloading(false);
+    setDownloadProgress(0);
+  };
+
+  const handleSpeechDownload = async () => {
+    setSpeechDownloading(true);
+    setSpeechDownloadProgress(0);
+    try {
+      await downloadSpeechModel('base.en', (progress) => {
+        setSpeechDownloadProgress(progress);
+      });
+      setSpeechModelReady(true);
+      setSpeechDownloading(false);
+      Alert.alert('Success', `${SPEECH_MODELS['base.en'].label} downloaded successfully!`);
+    } catch (err: any) {
+      setSpeechDownloading(false);
+      if (err.message?.includes('cancel') || err.message?.includes('Cancel')) {
+        return;
+      }
+      Alert.alert('Download Error', `Failed to download local speech model: ${err.message}`);
+    }
+  };
+
+  const handleSpeechCancelDownload = async () => {
+    await cancelSpeechModelDownload();
+    setSpeechDownloading(false);
+    setSpeechDownloadProgress(0);
+  };
 
   // â”€â”€ Live Camera PiP State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Completely isolated from audio/chat state â€” uses its own interval ref
@@ -433,7 +574,7 @@ export default function SearchScreen() {
   }, [messages, activeThreadId, storeReady]);
 
   useEffect(() => { setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 40); }, [messages, sending]);
-  useEffect(() => { return () => { listenLoopActiveRef.current = false; recorder.stop().catch(() => {}); }; }, [recorder]);
+  useEffect(() => { return () => { listenLoopActiveRef.current = false; recorder.stop().catch(() => {}); abortPcmRecording(); }; }, [recorder]);
 
   // Cleanup camera interval on unmount
   useEffect(() => {
@@ -465,6 +606,14 @@ export default function SearchScreen() {
   const prepareImage = async (uri: string): Promise<SelectedImage> => {
     const m = await ImageManipulator.manipulateAsync(uri, [{ resize: { width: 640 } }], { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG });
     return { uri: m.uri, base64: await FileSystem.readAsStringAsync(m.uri, { encoding: 'base64' as any }), mimeType: 'image/jpeg' };
+  };
+  const prepareLocalVisionImage = async (uri: string): Promise<string> => {
+    const m = await ImageManipulator.manipulateAsync(
+      uri,
+      [{ resize: { width: 384 } }],
+      { compress: 0.35, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return m.uri;
   };
 
   // â”€â”€ Live Camera Frame Capture â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -560,21 +709,92 @@ export default function SearchScreen() {
     setSending(true);
     try {
       let extractedText = ''; let imageContext = ''; let promptForChat = userMessage.text;
-      if (imageForRequest) {
-        const vision = await analyzeImageWithGroq(imageForRequest.base64, imageForRequest.mimeType,
-          'Extract image text and visual context. Output EXACTLY in this format:\nEXTRACTED_TEXT_START\n<all readable text exactly as seen>\nEXTRACTED_TEXT_END\nVISUAL_CONTEXT_START\n<brief scene/object summary>\nVISUAL_CONTEXT_END\nPRIMARY_QUESTION: <most important question found in extracted text, or NONE>');
-        const parsed = parseVisionPayload(vision.description);
-        extractedText = parsed.extractedText;
-        if (extractedText) { imageMemoryRef.current.push(embedItem(`img-${Date.now()}`, extractedText)); imageMemoryRef.current = pruneOldItems(imageMemoryRef.current, 3600000); }
-        imageContext = [extractedText ? `Extracted text:\n${extractedText}` : '', parsed.visualContext ? `Visual context:\n${parsed.visualContext}` : ''].filter(Boolean).join('\n\n');
-        const pq = parsed.primaryQuestion || extractFirstQuestion(extractedText) || '';
-        promptForChat = pq ? `Question detected in image text: "${pq}". Answer only this question directly.` : 'No question was found in image text. Give a concise answer about what you think this image is conveying.';
+      const isLocalVision = modelProvider === 'local' && activeLocalModel === 'phi3_vision';
+
+      if (imageForRequest && !isLocalVision) {
+        try {
+          const vision = await analyzeImageWithGroq(imageForRequest.base64, imageForRequest.mimeType,
+            'Extract image text and visual context. Output EXACTLY in this format:\nEXTRACTED_TEXT_START\n<all readable text exactly as seen>\nEXTRACTED_TEXT_END\nVISUAL_CONTEXT_START\n<brief scene/object summary>\nVISUAL_CONTEXT_END\nPRIMARY_QUESTION: <most important question found in extracted text, or NONE>');
+          const parsed = parseVisionPayload(vision.description);
+          extractedText = parsed.extractedText;
+          if (extractedText) { imageMemoryRef.current.push(embedItem(`img-${Date.now()}`, extractedText)); imageMemoryRef.current = pruneOldItems(imageMemoryRef.current, 3600000); }
+          imageContext = [extractedText ? `Extracted text:\n${extractedText}` : '', parsed.visualContext ? `Visual context:\n${parsed.visualContext}` : ''].filter(Boolean).join('\n\n');
+          const pq = parsed.primaryQuestion || extractFirstQuestion(extractedText) || '';
+          promptForChat = pq ? `Question detected in image text: "${pq}". Answer only this question directly.` : 'No question was found in image text. Give a concise answer about what you think this image is conveying.';
+        } catch (visionErr: any) {
+          console.warn('Vision analysis failed, proceeding with pure text query:', visionErr);
+          imageContext = '[Image analysis failed or device is offline]';
+          if (modelProvider === 'local' && activeLocalModel === 'qwen') {
+            Alert.alert(
+              'Offline Image Recognition',
+              'Qwen is a text-only model. To perform image recognition completely offline, switch to the Phi-3 Vision model.',
+              [{ text: 'OK' }]
+            );
+          }
+        }
       }
       const pastImages = imageMemoryRef.current.length > 0 ? findSimilarItems(promptForChat, imageMemoryRef.current, 2, 0.4) : [];
-      const pastImageContext = pastImages.length > 0 ? '\n\n[Relevant past images for context]:\n' + pastImages.map(i => `â€¢ ${i.text.substring(0, 150)}`).join('\n') : '';
+      const pastImageContext = pastImages.length > 0 ? '\n\n[Relevant past images for context]:\n' + pastImages.map(i => `• ${i.text.substring(0, 150)}`).join('\n') : '';
       const ragContextWithContent = ragDocs.length > 0 ? await (async () => formatRagContext(retrieveTopChunks(promptForChat, await loadChunkIndex(), 5)))() : '';
-      const res = await chatWithGroqText(promptForChat + pastImageContext + (ragContextWithContent ? '\n\n' + ragContextWithContent : ''), contextHistory, imageContext || undefined);
-      setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: res.content || 'No response from model.', extractedText: extractedText || imageContext, createdAt: Date.now() }]);
+      
+      const fullPrompt = promptForChat + pastImageContext + (ragContextWithContent ? '\n\n' + ragContextWithContent : '');
+
+      if (modelProvider === 'local') {
+        const assistantMsgId = `a-${Date.now()}`;
+        setMessages((prev) => [...prev, {
+          id: assistantMsgId,
+          role: 'assistant',
+          text: isLocalVision ? 'Analyzing Image Offline...' : 'Initializing Local Engine...',
+          extractedText: isLocalVision ? undefined : (extractedText || imageContext),
+          createdAt: Date.now()
+        }]);
+
+        const localHistory: LocalChatMessage[] = messages
+          .filter((m) => m.id !== 'welcome')
+          .slice(-12)
+          .map((m) => ({
+            role: m.role === 'user' ? 'user' : 'assistant',
+            text: m.text,
+          }));
+
+        let localVisionUri: string | null = null;
+        try {
+          if (isLocalVision && imageForRequest?.uri) {
+            localVisionUri = await prepareLocalVisionImage(imageForRequest.uri);
+          }
+          await chatWithLocalLlama(
+            activeLocalModel,
+            fullPrompt,
+            localHistory,
+            (token, accumulated) => {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMsgId
+                    ? { ...msg, text: accumulated }
+                    : msg
+                )
+              );
+            },
+            isLocalVision ? (localVisionUri || imageForRequest?.uri) : undefined,
+            imageContext ? `You are a concise, helpful on-device assistant. An image was attached to this turn. Image context:\n${imageContext}` : undefined
+          );
+        } catch (localErr: any) {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMsgId
+                ? { ...msg, text: `Local engine error: ${localErr.message || 'Unknown error'}` }
+                : msg
+            )
+          );
+        } finally {
+          if (localVisionUri) {
+            await FileSystem.deleteAsync(localVisionUri, { idempotent: true }).catch(() => {});
+          }
+        }
+      } else {
+        const res = await chatWithGroqText(fullPrompt, contextHistory, imageContext || undefined);
+        setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: res.content || 'No response from model.', extractedText: extractedText || imageContext, createdAt: Date.now() }]);
+      }
     } catch (err: any) {
       setMessages((prev) => [...prev, { id: `aerr-${Date.now()}`, role: 'assistant', text: `Error: ${err?.message ?? 'Request failed'}`, createdAt: Date.now() }]);
     } finally { setSending(false); }
@@ -582,23 +802,90 @@ export default function SearchScreen() {
 
   const addAssistantMessage = (answer: string) => { setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: answer, createdAt: Date.now() }]); };
   const handleSend = async () => { if (!canSend) return; await submitMessage(input.trim() || 'Analyze this image.', selectedImage); };
+  
+  const startPcmRecording = () => {
+    if (pcmRecordingRef.current) return;
+    pcmChunksRef.current = [];
+    AudioRecord.init(PCM_OPTIONS);
+    pcmSubscriptionRef.current?.remove?.();
+    pcmSubscriptionRef.current = AudioRecord.on('data', (data: string) => {
+      if (data) {
+        pcmChunksRef.current.push(data);
+      }
+    });
+    AudioRecord.start();
+    pcmRecordingRef.current = true;
+  };
+
+  const stopPcmRecording = async (): Promise<string | null> => {
+    if (!pcmRecordingRef.current) return null;
+    try {
+      AudioRecord.stop();
+    } catch {}
+    pcmRecordingRef.current = false;
+    pcmSubscriptionRef.current?.remove?.();
+    pcmSubscriptionRef.current = null;
+    const chunks = pcmChunksRef.current;
+    pcmChunksRef.current = [];
+    return writeWavFileFromChunks(chunks, {
+      sampleRate: PCM_OPTIONS.sampleRate,
+      channels: PCM_OPTIONS.channels,
+      bitsPerSample: PCM_OPTIONS.bitsPerSample,
+    });
+  };
+
+  const abortPcmRecording = () => {
+    if (!pcmRecordingRef.current) return;
+    try {
+      AudioRecord.stop();
+    } catch {}
+    pcmRecordingRef.current = false;
+    pcmSubscriptionRef.current?.remove?.();
+    pcmSubscriptionRef.current = null;
+    pcmChunksRef.current = [];
+  };
 
   const startHoldRecording = async () => {
     if (sending || liveListening || holdRecording) return;
     const p = await requestRecordingPermissionsAsync();
     if (!p.granted) { Alert.alert('Permission needed', 'Please allow microphone access.'); return; }
-    try { latestRecordingUrlRef.current = null; await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true }); await recorder.prepareToRecordAsync(); recorder.record(); setHoldRecording(true); }
+    try {
+      latestRecordingUrlRef.current = null;
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      if (speechProvider === 'local') {
+        if (!speechModelReady) {
+          Alert.alert('Local Speech Model', 'Please download the local speech model first.');
+          await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
+          return;
+        }
+        startPcmRecording();
+        setHoldRecording(true);
+        return;
+      }
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+      setHoldRecording(true);
+    }
     catch { setHoldRecording(false); }
   };
 
   const stopHoldRecording = async () => {
     if (!holdRecording) return; setHoldRecording(false);
     try {
-      await recorder.stop(); const uri = latestRecordingUrlRef.current; if (!uri) return;
-      const transcript = await transcribeAudioWithGroq(uri);
-      await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
-      const fp = transcript.trim(); if (!fp) return;
-      await submitMessage(fp, null, false);
+      if (speechProvider === 'local') {
+        const wavPath = await stopPcmRecording();
+        if (!wavPath) return;
+        const transcript = await transcribeAudioWithLocalWhisper(wavPath);
+        await FileSystem.deleteAsync(wavPath, { idempotent: true }).catch(() => {});
+        const fp = transcript.trim(); if (!fp) return;
+        await submitMessage(fp, null, false);
+      } else {
+        await recorder.stop(); const uri = latestRecordingUrlRef.current; if (!uri) return;
+        const transcript = await transcribeAudioWithGroq(uri);
+        await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+        const fp = transcript.trim(); if (!fp) return;
+        await submitMessage(fp, null, false);
+      }
     } finally { await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {}); }
   };
 
@@ -617,11 +904,25 @@ export default function SearchScreen() {
     }
   };
 
+  const captureLocalPcmChunk = async (): Promise<string | null> => {
+    try {
+      startPcmRecording();
+      await new Promise((resolve) => setTimeout(resolve, LOCAL_STT_CHUNK_MS));
+      if (!listenLoopActiveRef.current) { abortPcmRecording(); return null; }
+      return await stopPcmRecording();
+    } catch (err: any) {
+      setLiveStatus(`Capture error: ${err?.message ?? 'Unknown'}`);
+      abortPcmRecording();
+      return null;
+    }
+  };
+
   const stopLiveListening = async () => {
     listenLoopActiveRef.current = false;
     setLiveListening(false);
     setLiveStatus('Live listen is off');
     await recorder.stop().catch(() => {});
+    abortPcmRecording();
     await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true }).catch(() => {});
   };
 
@@ -678,12 +979,50 @@ export default function SearchScreen() {
     }
   };
 
+  const runLiveLoopLocalSpeech = async () => {
+    while (listenLoopActiveRef.current) {
+      try {
+        setLiveStatus('Listening...');
+        const wavPath = await captureLocalPcmChunk();
+        if (!listenLoopActiveRef.current) break;
+        if (!wavPath) continue;
+
+        setLiveStatus('Transcribing locally...');
+        const transcript = await transcribeAudioWithLocalWhisper(wavPath);
+        await FileSystem.deleteAsync(wavPath, { idempotent: true }).catch(() => {});
+
+        const cleaned = transcript.trim();
+        if (!cleaned) {
+          setLiveStatus('No speech detected. Continuing...');
+          continue;
+        }
+
+        setLiveStatus(`Heard: "${cleaned.substring(0, 50)}..."`);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `live-stt-${Date.now()}`,
+            role: 'user' as const,
+            text: `[Live] ${cleaned}`,
+            createdAt: Date.now(),
+          },
+        ]);
+      } catch (err: any) {
+        setLiveStatus(`Error: ${err?.message ?? 'Unknown error'}`);
+      }
+    }
+  };
+
   const startLiveListening = async () => {
     if (liveListening || sending) return;
 
     const permission = await requestRecordingPermissionsAsync();
     if (!permission.granted) {
       Alert.alert('Permission needed', 'Please allow microphone access for live listening mode.');
+      return;
+    }
+    if (speechProvider === 'local' && !speechModelReady) {
+      Alert.alert('Local Speech Model', 'Please download the local speech model first.');
       return;
     }
 
@@ -696,13 +1035,13 @@ export default function SearchScreen() {
     lastQuestionTimeRef.current = 0;
     listenLoopActiveRef.current = true;
     setLiveListening(true);
-    setLiveStatus('Starting Groq Live Listen...');
+    setLiveStatus(speechProvider === 'local' ? 'Starting Local Live Listen...' : 'Starting Groq Live Listen...');
 
     // Start the loop with a small delay
     setTimeout(() => {
       if (listenLoopActiveRef.current) {
         setLiveStatus('Listening...');
-        void runLiveLoopGroqOnly();
+        void (speechProvider === 'local' ? runLiveLoopLocalSpeech() : runLiveLoopGroqOnly());
       }
     }, 500);
   };
@@ -799,7 +1138,7 @@ export default function SearchScreen() {
     ).catch(() => {});
   };
 
-  const typingMessage: ChatMessage | null = sending
+  const typingMessage: ChatMessage | null = (sending && modelProvider !== 'local')
     ? { id: 'typing', role: 'assistant', text: 'Thinking...', createdAt: Date.now() }
     : null;
 
@@ -866,32 +1205,102 @@ export default function SearchScreen() {
         />
 
         {mode === 'listen' ? (
-          <View style={styles.livePanel}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.liveTitle}>Live Listen Mode</Text>
-              <Text style={styles.liveStatus}>{liveStatus}</Text>
+          <>
+            <View style={styles.localModelToggleRow}>
+              <Pressable
+                style={[styles.localModelTab, speechProvider === 'groq' && styles.localModelTabActive]}
+                onPress={() => setSpeechProvider('groq')}
+                disabled={speechDownloading}
+              >
+                <Ionicons name="cloud-outline" size={13} color={speechProvider === 'groq' ? '#10B981' : '#8A8A8A'} />
+                <Text style={[styles.localModelTabText, speechProvider === 'groq' && styles.localModelTabTextActive]}>
+                  Groq STT
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[styles.localModelTab, speechProvider === 'local' && styles.localModelTabActive]}
+                onPress={() => setSpeechProvider('local')}
+                disabled={speechDownloading}
+              >
+                <Ionicons name="phone-portrait-outline" size={13} color={speechProvider === 'local' ? '#10B981' : '#8A8A8A'} />
+                <Text style={[styles.localModelTabText, speechProvider === 'local' && styles.localModelTabTextActive]}>
+                  Local Whisper
+                </Text>
+              </Pressable>
             </View>
-            {/* Camera toggle - fully independent of the mic loop */}
-            <Pressable
-              style={[styles.liveCameraBtn, cameraActive && styles.liveCameraBtnActive]}
-              onPress={cameraActive ? stopLiveCamera : startLiveCamera}
-              accessibilityLabel={cameraActive ? 'Stop live camera' : 'Start live camera'}
-            >
-              <Ionicons
-                name={cameraActive ? 'videocam' : 'videocam-outline'}
-                size={18}
-                color={cameraActive ? '#000' : '#CFCFCF'}
-              />
-            </Pressable>
-            <Pressable
-              style={[styles.liveBtn, liveListening && styles.liveBtnStop]}
-              onPress={liveListening ? stopLiveListening : startLiveListening}
-              disabled={sending}
-            >
-              <Ionicons name={liveListening ? 'stop' : 'mic'} size={20} color="#000" />
-              <Text style={styles.liveBtnText}>{liveListening ? 'Stop' : 'Start'}</Text>
-            </Pressable>
-          </View>
+
+            {speechProvider === 'local' && !speechModelReady ? (
+              <BlurView
+                intensity={70}
+                tint="dark"
+                style={[styles.downloadCard, { marginBottom: 12 }]}
+              >
+                <LinearGradient
+                  colors={['rgba(16, 185, 129, 0.08)', 'rgba(0,0,0,0)']}
+                  style={styles.downloadCardGlow}
+                />
+                <View style={styles.downloadCardHeader}>
+                  <Ionicons name="cloud-download-outline" size={28} color="#10B981" />
+                  <Text style={styles.downloadCardTitle}>Setup {SPEECH_MODELS['base.en'].label}</Text>
+                  <Text style={styles.downloadCardSub}>
+                    Download the {SPEECH_MODELS['base.en'].label} model (~{SPEECH_MODELS['base.en'].sizeLabel}) to run offline speech recognition.
+                  </Text>
+                </View>
+
+                {speechDownloading ? (
+                  <View style={styles.downloadProgressContainer}>
+                    <View style={styles.progressBarBg}>
+                      <View style={[styles.progressBarFill, { width: `${speechDownloadProgress * 100}%` }]} />
+                    </View>
+                    <View style={styles.downloadMeta}>
+                      <Text style={styles.downloadMetaText}>
+                        {(speechDownloadProgress * 100).toFixed(1)}% Downloaded
+                      </Text>
+                      <Pressable style={styles.cancelBtn} onPress={handleSpeechCancelDownload}>
+                        <Text style={styles.cancelBtnText}>Cancel</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.downloadActions}>
+                    <Pressable style={styles.downloadStartBtn} onPress={handleSpeechDownload}>
+                      <Text style={styles.downloadStartBtnText}>Download Speech Model</Text>
+                    </Pressable>
+                    <Pressable style={styles.backToGroqBtn} onPress={() => setSpeechProvider('groq')}>
+                      <Text style={styles.backToGroqBtnText}>Use Cloud Instead</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </BlurView>
+            ) : null}
+
+            <View style={styles.livePanel}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.liveTitle}>Live Listen Mode</Text>
+                <Text style={styles.liveStatus}>{liveStatus}</Text>
+              </View>
+              {/* Camera toggle - fully independent of the mic loop */}
+              <Pressable
+                style={[styles.liveCameraBtn, cameraActive && styles.liveCameraBtnActive]}
+                onPress={cameraActive ? stopLiveCamera : startLiveCamera}
+                accessibilityLabel={cameraActive ? 'Stop live camera' : 'Start live camera'}
+              >
+                <Ionicons
+                  name={cameraActive ? 'videocam' : 'videocam-outline'}
+                  size={18}
+                  color={cameraActive ? '#000' : '#CFCFCF'}
+                />
+              </Pressable>
+              <Pressable
+                style={[styles.liveBtn, liveListening && styles.liveBtnStop]}
+                onPress={liveListening ? stopLiveListening : startLiveListening}
+                disabled={sending}
+              >
+                <Ionicons name={liveListening ? 'stop' : 'mic'} size={20} color="#000" />
+                <Text style={styles.liveBtnText}>{liveListening ? 'Stop' : 'Start'}</Text>
+              </Pressable>
+            </View>
+          </>
         ) : null}
 
         {mode === 'chat' ? (
@@ -906,45 +1315,139 @@ export default function SearchScreen() {
               </View>
             ) : null}
 
-            <BlurView
-              intensity={70}
-              tint="dark"
-              style={[styles.composer, { marginBottom: keyboardVisible ? 12 : insets.bottom + 20 }]}
-              onLayout={(event) => setComposerY(event.nativeEvent.layout.y)}
-            >
-              <TextInput
-                value={input}
-                onChangeText={setInput}
-                placeholder="Ask anything..."
-                placeholderTextColor="#8A8A8A"
-                style={styles.input}
-                editable={!sending}
-                multiline
-              />
-              <View style={styles.composerActions}>
-                <Pressable style={styles.plusBtn} onPress={pickImage} disabled={sending}>
-                  <Ionicons name="add" size={20} color="#CFCFCF" />
-                </Pressable>
-                <View style={styles.modelChip}>
-                  <Text style={styles.modelChipText}>Model</Text>
-                </View>
-                <View style={{ flex: 1 }} />
-                <Pressable style={styles.iconBtn} onPress={handleCaptureToChat} disabled={sending}>
-                  <Ionicons name="camera-outline" size={20} color="#CFCFCF" />
+            {modelProvider === 'local' ? (
+              <View style={styles.localModelToggleRow}>
+                <Pressable
+                  style={[styles.localModelTab, activeLocalModel === 'qwen' && styles.localModelTabActive]}
+                  onPress={() => !isDownloading && setActiveLocalModel('qwen')}
+                >
+                  <Ionicons name="document-text-outline" size={13} color={activeLocalModel === 'qwen' ? '#10B981' : '#8A8A8A'} />
+                  <Text style={[styles.localModelTabText, activeLocalModel === 'qwen' && styles.localModelTabTextActive]}>
+                    Text (Qwen 1.5B)
+                  </Text>
                 </Pressable>
                 <Pressable
-                  style={[styles.iconBtn, holdRecording && styles.iconBtnActive]}
-                  onPressIn={startHoldRecording}
-                  onPressOut={stopHoldRecording}
-                  disabled={sending || liveListening}
+                  style={[styles.localModelTab, activeLocalModel === 'phi3_vision' && styles.localModelTabActive]}
+                  onPress={() => !isDownloading && setActiveLocalModel('phi3_vision')}
                 >
-                  <Ionicons name="mic" size={20} color={holdRecording ? '#111111' : '#CFCFCF'} />
-                </Pressable>
-                <Pressable style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]} onPress={handleSend} disabled={!canSend}>
-                  <Ionicons name="arrow-up" size={18} color="#000000" />
+                  <Ionicons name="eye-outline" size={13} color={activeLocalModel === 'phi3_vision' ? '#10B981' : '#8A8A8A'} />
+                  <Text style={[styles.localModelTabText, activeLocalModel === 'phi3_vision' && styles.localModelTabTextActive]}>
+                    Vision (Phi-3 3.8B)
+                  </Text>
                 </Pressable>
               </View>
-            </BlurView>
+            ) : null}
+
+            {modelProvider === 'local' && !isDownloaded ? (
+              <BlurView
+                intensity={80}
+                tint="dark"
+                style={[styles.downloadCard, { marginBottom: keyboardVisible ? 12 : insets.bottom + 20 }]}
+              >
+                <LinearGradient
+                  colors={['rgba(16, 185, 129, 0.08)', 'rgba(0,0,0,0)']}
+                  style={styles.downloadCardGlow}
+                />
+                <View style={styles.downloadCardHeader}>
+                  <Ionicons name="cloud-download-outline" size={28} color="#10B981" />
+                  <Text style={styles.downloadCardTitle}>Setup {MODELS[activeLocalModel].label}</Text>
+                  <Text style={styles.downloadCardSub}>
+                    {activeLocalModel === 'phi3_vision'
+                      ? 'Download the Phi-3 Vision 3.8B model & projector (~2.5 GB total) to run highly intelligent chat and offline image recognition on your device.'
+                      : 'Download the lightweight Qwen 1.5B model (~980 MB) to run chat and reasoning completely offline on your device.'
+                    }
+                  </Text>
+                </View>
+
+                {isDownloading ? (
+                  <View style={styles.downloadProgressContainer}>
+                    <View style={styles.progressBarBg}>
+                      <View style={[styles.progressBarFill, { width: `${downloadProgress * 100}%` }]} />
+                    </View>
+                    <View style={styles.downloadMeta}>
+                      <Text style={styles.downloadMetaText}>
+                        {(downloadProgress * 100).toFixed(1)}% Downloaded
+                      </Text>
+                      <Pressable style={styles.cancelBtn} onPress={handleCancelDownload}>
+                        <Text style={styles.cancelBtnText}>Cancel</Text>
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.downloadActions}>
+                    <Pressable style={styles.downloadStartBtn} onPress={handleStartDownload}>
+                      <Text style={styles.downloadStartBtnText}>Download Model</Text>
+                    </Pressable>
+                    <Pressable style={styles.backToGroqBtn} onPress={() => setModelProvider('groq')}>
+                      <Text style={styles.backToGroqBtnText}>Use Cloud Instead</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </BlurView>
+            ) : (
+              <BlurView
+                intensity={70}
+                tint="dark"
+                style={[styles.composer, { marginBottom: keyboardVisible ? 12 : insets.bottom + 20 }]}
+                onLayout={(event) => setComposerY(event.nativeEvent.layout.y)}
+              >
+                <TextInput
+                  value={input}
+                  onChangeText={setInput}
+                  placeholder="Ask anything..."
+                  placeholderTextColor="#8A8A8A"
+                  style={styles.input}
+                  editable={!sending}
+                  multiline
+                />
+                <View style={styles.composerActions}>
+                  <Pressable style={styles.plusBtn} onPress={pickImage} disabled={sending}>
+                    <Ionicons name="add" size={20} color="#CFCFCF" />
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.modelChip,
+                      modelProvider === 'local' && styles.modelChipLocalActive,
+                    ]}
+                    onPress={toggleModelProvider}
+                    onLongPress={handleModelChipLongPress}
+                    disabled={sending}
+                  >
+                    <View style={styles.modelChipInner}>
+                      <Ionicons
+                        name={modelProvider === 'groq' ? 'cloud-outline' : 'phone-portrait-outline'}
+                        size={14}
+                        color={modelProvider === 'groq' ? '#A6A6A6' : '#10B981'}
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text
+                        style={[
+                          styles.modelChipText,
+                          modelProvider === 'local' && styles.modelChipTextLocalActive,
+                        ]}
+                      >
+                        {modelProvider === 'groq' ? 'Groq' : (activeLocalModel === 'qwen' ? 'Local Qwen' : 'Local Phi-3')}
+                      </Text>
+                    </View>
+                  </Pressable>
+                  <View style={{ flex: 1 }} />
+                  <Pressable style={styles.iconBtn} onPress={handleCaptureToChat} disabled={sending}>
+                    <Ionicons name="camera-outline" size={20} color="#CFCFCF" />
+                  </Pressable>
+                  <Pressable
+                    style={[styles.iconBtn, holdRecording && styles.iconBtnActive]}
+                    onPressIn={startHoldRecording}
+                    onPressOut={stopHoldRecording}
+                    disabled={sending || liveListening}
+                  >
+                    <Ionicons name="mic" size={20} color={holdRecording ? '#111111' : '#CFCFCF'} />
+                  </Pressable>
+                  <Pressable style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]} onPress={handleSend} disabled={!canSend}>
+                    <Ionicons name="arrow-up" size={18} color="#000000" />
+                  </Pressable>
+                </View>
+              </BlurView>
+            )}
           </>
         ) : (
           <View style={{ height: insets.bottom + 8 }} />
@@ -1514,6 +2017,123 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  modelChipLocalActive: {
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    borderColor: 'rgba(16, 185, 129, 0.25)',
+    borderWidth: 1,
+  },
+  modelChipTextLocalActive: {
+    color: '#10B981',
+  },
+  modelChipInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  downloadCard: {
+    padding: 20,
+    borderRadius: 20,
+    backgroundColor: 'rgba(20, 20, 20, 0.75)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  downloadCardGlow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 120,
+  },
+  downloadCardHeader: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  downloadCardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#F5F5F5',
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  downloadCardSub: {
+    fontSize: 13,
+    color: '#A6A6A6',
+    textAlign: 'center',
+    lineHeight: 18,
+    paddingHorizontal: 10,
+  },
+  downloadProgressContainer: {
+    width: '100%',
+  },
+  progressBarBg: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    width: '100%',
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#10B981',
+    borderRadius: 3,
+  },
+  downloadMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  downloadMetaText: {
+    color: '#F5F5F5',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  cancelBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 99, 99, 0.12)',
+  },
+  cancelBtnText: {
+    color: '#FF6363',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  downloadActions: {
+    flexDirection: 'column',
+    gap: 10,
+    width: '100%',
+  },
+  downloadStartBtn: {
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  downloadStartBtnText: {
+    color: '#000000',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  backToGroqBtn: {
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backToGroqBtnText: {
+    color: '#8A8A8A',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   iconBtn: {
     width: 32,
     height: 32,
@@ -1725,4 +2345,34 @@ const styles = StyleSheet.create({
   backToRootBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 12, paddingVertical: 8 },
   processingOverlay: { backgroundColor: '#1A1A1A', borderRadius: 12, padding: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 16, borderWidth: 1, borderColor: '#333', flexDirection: 'row', gap: 12 },
   processingText: { color: '#FFF', fontSize: 14, fontWeight: '500' },
+  localModelToggleRow: {
+    flexDirection: 'row',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderRadius: 20,
+    padding: 3,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  localModelTab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+  },
+  localModelTabActive: {
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+  },
+  localModelTabText: {
+    color: '#8A8A8A',
+    fontSize: 11,
+    fontWeight: '500',
+    marginLeft: 6,
+  },
+  localModelTabTextActive: {
+    color: '#10B981',
+    fontWeight: '600',
+  },
 });
