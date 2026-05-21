@@ -26,8 +26,9 @@ Transform how you participate in meetings. Sahai doesn't just record; it underst
 - **Autonomous Answering:** Generates context-aware answers to detected questions in the background.
 - **Live Diarization:** (Planned) Persistent voice enrollment for personalized speaker filtering.
 
-### 🔒 100% Local AI Processing
-Sahai prioritizes your privacy by running models locally.
+### 🔒 Hybrid AI Processing
+Sahai combines the power of cloud AI with the privacy of local models. Cloud models are not eliminated; instead, local models are included alongside cloud models to provide secure, on-device processing where needed.
+- **Cloud Models:** Leverages Groq and Gemini for high-performance reasoning and processing.
 - **Local Reasoning:** Powered by Qwen 2.5 for fast, secure, and private text generation.
 - **Local Vision:** Uses Phi (3.8B) for private, on-device visual analysis.
 - **Local Transcription:** Employs OpenAI Whisper for accurate, offline audio transcription.
@@ -56,7 +57,7 @@ See the world through the eyes of AI.
 | Layer | Technologies |
 | :--- | :--- |
 | **Frontend** | React Native, Expo Router, Reanimated, Expo Blur, Expo Haptics |
-| **AI Models** | Qwen 2.5 (Local Reasoning), Phi 3.8B (Local Vision) |
+| **AI Models** | Groq, Gemini, Qwen 2.5 (Local Reasoning), Phi 3.8B (Local Vision) |
 | **Services** | OpenAI Whisper (Local Speech-to-Text), Custom Question Detection |
 | **Data Engine** | Local File System (Expo FS), BM25 Retrieval, Persistent JSON Storage |
 | **Language** | TypeScript (Strict Mode) |
@@ -127,6 +128,18 @@ Sahai is designed with a service-oriented architecture to ensure modularity and 
         <img src="assets/images/screenshot_chat.jpeg" alt="AI Chat Session" width="250" style="border-radius: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
         <br />
         <p align="center" style="margin-top: 8px;"><b> Chat interface</b></p>
+      </td>
+    </tr>
+    <tr style="border: none;">
+      <td style="padding: 10px; border: none; text-align: center; vertical-align: top;">
+        <img src="assets/images/screenshot1.jpeg" alt="Screenshot 1" width="250" style="border-radius: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
+        <br />
+        <p align="center" style="margin-top: 8px;"><b> Additional Feature 1</b></p>
+      </td>
+      <td style="padding: 10px; border: none; text-align: center; vertical-align: top;">
+        <img src="assets/images/screenshot2.jpeg" alt="Screenshot 2" width="250" style="border-radius: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);" />
+        <br />
+        <p align="center" style="margin-top: 8px;"><b> Additional Feature 2</b></p>
       </td>
     </tr>
   </table>
