@@ -26,6 +26,12 @@ Transform how you participate in meetings. Sahai doesn't just record; it underst
 - **Autonomous Answering:** Generates context-aware answers to detected questions in the background.
 - **Live Diarization:** (Planned) Persistent voice enrollment for personalized speaker filtering.
 
+### 🔒 100% Local AI Processing
+Sahai prioritizes your privacy by running models locally.
+- **Local Reasoning:** Powered by Qwen 2.5 for fast, secure, and private text generation.
+- **Local Vision:** Uses Phi (3.8B) for private, on-device visual analysis.
+- **Local Transcription:** Employs OpenAI Whisper for accurate, offline audio transcription.
+
 ### 🧠 Advanced RAG (Retrieval-Augmented Generation)
 Your documents, now searchable and conversational.
 - **Massive Context Support:** Upload and index up to 50 documents (PDFs, TXT, Code files).
@@ -50,8 +56,8 @@ See the world through the eyes of AI.
 | Layer | Technologies |
 | :--- | :--- |
 | **Frontend** | React Native, Expo Router, Reanimated, Expo Blur, Expo Haptics |
-| **AI Models** | Groq (Llama 3.3 / Llama 3.2 Vision), Google Gemini 2.0 Flash |
-| **Services** | Whisper (Speech-to-Text), Groq Audio, Custom Question Detection |
+| **AI Models** | Qwen 2.5 (Local Reasoning), Phi 3.8B (Local Vision) |
+| **Services** | OpenAI Whisper (Local Speech-to-Text), Custom Question Detection |
 | **Data Engine** | Local File System (Expo FS), BM25 Retrieval, Persistent JSON Storage |
 | **Language** | TypeScript (Strict Mode) |
 
